@@ -139,8 +139,22 @@ npm test
 
 - Public self-registration (`/register`) always creates a **patient** account.
 - **Doctor**, **receptionist**, and **admin** accounts are provisioned by an
-  admin from the Staff / Doctors pages — sign in with the account created by
-  `npm run seed` (`admin@hms.local` / see console output) to create the rest.
+  admin from the Staff / Doctors pages.
+- **Running on the zero-config in-memory database** (no `MONGO_URI` set): the
+  backend seeds one ready-to-use login per staff role on every startup —
+  printed to the console, and reproduced here:
+
+  | Role | Email | Password |
+  |---|---|---|
+  | Admin | `admin@demo.hms` | `Password123` |
+  | Doctor | `doctor@demo.hms` | `Password123` |
+  | Receptionist | `receptionist@demo.hms` | `Password123` |
+  | Patient | *(register your own at `/register`)* | — |
+
+  This data is thrown away on every restart. Once you point `MONGO_URI` at a
+  real cluster, use `npm run seed` instead to create a single bootstrap admin
+  (`admin@hms.local` — see console output), then create the rest from the
+  Staff / Doctors pages.
 
 ## Deployment
 
