@@ -182,14 +182,14 @@ npm test
 CI (`.github/workflows/backend-ci.yml`) runs the backend Jest suite against a
 disposable `postgres:16` service container on every push and pull request.
 
-## Screenshots & live demo
+## Live demo
 
-_Add screenshots and the deployed URLs here once the app is deployed to
-Vercel/Render — e.g._
+- Frontend: https://meridian-health-rust.vercel.app
+- Backend API: https://meridian-health-api.onrender.com/api/health
+- Database: Supabase (Postgres)
 
-```markdown
-![Landing page](docs/screenshots/landing.png)
-![Admin dashboard](docs/screenshots/admin-overview.png)
+The backend is on Render's free tier, which spins down after inactivity —
+the first request after a while can take 30–60s to wake it back up.
 
-Live demo: https://your-app.vercel.app
-```
+Sign in with `admin@hms.local` / `ChangeMe123!` (change this password after
+first login), or register your own patient account.
