@@ -3,12 +3,12 @@ import crypto from "crypto";
 import { env } from "../config/env.js";
 
 export const signAccessToken = (user) =>
-  jwt.sign({ sub: user._id.toString(), role: user.role }, env.jwt.accessSecret, {
+  jwt.sign({ sub: user.id, role: user.role }, env.jwt.accessSecret, {
     expiresIn: env.jwt.accessExpiresIn,
   });
 
 export const signRefreshToken = (user) =>
-  jwt.sign({ sub: user._id.toString(), jti: crypto.randomUUID() }, env.jwt.refreshSecret, {
+  jwt.sign({ sub: user.id, jti: crypto.randomUUID() }, env.jwt.refreshSecret, {
     expiresIn: env.jwt.refreshExpiresIn,
   });
 

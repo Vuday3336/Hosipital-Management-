@@ -2,6 +2,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { env } from "../config/env.js";
+import { prisma } from "../config/db.js";
 import {
   createUser,
   issueTokenPair,
@@ -10,9 +11,9 @@ import {
   revokeRefreshToken,
   requestPasswordReset,
   resetPassword as resetPasswordService,
+  toSafeUser,
+  comparePassword,
 } from "../services/auth.service.js";
-import { User } from "../models/User.js";
-import { Patient } from "../models/Patient.js";
 import bcrypt from "bcryptjs";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email.service.js";
 
@@ -40,7 +41,9 @@ export const register = asyncHandler(async (req, res) => {
 
   // Every patient needs a Patient profile to book appointments, view records, and see
   // bills — self-registration creates a minimal stub; dob/gender get filled in later.
-  await Patient.create({ ...splitName(name), user: user._id, phone, email: user.email, registeredBy: user._id });
+  await prisma.patient.create({
+    data: { ...splitName(name), userId: user.id, phone, email: user.email, registeredById: user.id },
+  });
 
   const { accessToken, refreshToken } = await issueTokenPair(user, req.headers["user-agent"]);
   setRefreshCookie(res, refreshToken);
@@ -48,7 +51,7 @@ export const register = asyncHandler(async (req, res) => {
   sendSuccess(res, {
     statusCode: 201,
     message: "Account created",
-    data: { user: user.toSafeObject(), accessToken },
+    data: { user: toSafeUser(user), accessToken },
   });
 });
 
@@ -57,7 +60,7 @@ export const login = asyncHandler(async (req, res) => {
   const user = await authenticate(email, password);
   const { accessToken, refreshToken } = await issueTokenPair(user, req.headers["user-agent"]);
   setRefreshCookie(res, refreshToken);
-  sendSuccess(res, { message: "Logged in", data: { user: user.toSafeObject(), accessToken } });
+  sendSuccess(res, { message: "Logged in", data: { user: toSafeUser(user), accessToken } });
 });
 
 export const refresh = asyncHandler(async (req, res) => {
@@ -79,9 +82,9 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 export const me = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user.id);
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (!user) throw ApiError.notFound("User not found");
-  sendSuccess(res, { data: { user: user.toSafeObject() } });
+  sendSuccess(res, { data: { user: toSafeUser(user) } });
 });
 
 export const forgotPassword = asyncHandler(async (req, res) => {
@@ -102,15 +105,17 @@ export const resetPassword = asyncHandler(async (req, res) => {
 
 export const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  const user = await User.findById(req.user.id).select("+passwordHash +refreshTokens");
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (!user) throw ApiError.notFound("User not found");
 
-  const valid = await user.comparePassword(currentPassword);
+  const valid = await comparePassword(user, currentPassword);
   if (!valid) throw ApiError.badRequest("Current password is incorrect");
 
-  user.passwordHash = await bcrypt.hash(newPassword, 12);
-  user.refreshTokens = [];
-  await user.save();
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+    prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+  ]);
   clearRefreshCookie(res);
   sendSuccess(res, { message: "Password changed, please log in again", data: null });
 });

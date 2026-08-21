@@ -1,54 +1,60 @@
-import { Prescription } from "../models/Prescription.js";
-import { Doctor } from "../models/Doctor.js";
-import { Patient } from "../models/Patient.js";
+import { prisma } from "../config/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { getPagination, buildMeta } from "../utils/paginate.js";
+import { serialize, publicUserSelect } from "../utils/serialize.js";
+
+const doctorWithUser = { doctor: { include: { user: { select: publicUserSelect } } } };
+const patientBasic = { patient: { select: { id: true, firstName: true, lastName: true } } };
 
 export const createPrescription = asyncHandler(async (req, res) => {
-  const doctorDoc = await Doctor.findOne({ user: req.user.id });
+  const doctorDoc = await prisma.doctor.findUnique({ where: { userId: req.user.id } });
   if (!doctorDoc) throw ApiError.forbidden("No doctor profile linked to this account");
 
-  const prescription = await Prescription.create({ ...req.body, doctor: doctorDoc._id });
-  sendSuccess(res, { statusCode: 201, message: "Prescription created", data: { prescription } });
+  const { appointment, patient, diagnosis, medicines, notes } = req.body;
+  const prescription = await prisma.prescription.create({
+    data: { appointmentId: appointment, patientId: patient, doctorId: doctorDoc.id, diagnosis, medicines, notes },
+  });
+  sendSuccess(res, { statusCode: 201, message: "Prescription created", data: { prescription: serialize(prescription) } });
 });
 
 export const listPrescriptions = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filter = {};
+  const where = {};
 
-  // Fail closed: an unset filter key is dropped by the driver and would otherwise
-  // return every record in the hospital to a caller with no linked profile yet.
+  // Fail closed: a missing linked profile must return nothing, not everyone's records.
   if (req.user.role === "doctor") {
-    const doctorDoc = await Doctor.findOne({ user: req.user.id });
+    const doctorDoc = await prisma.doctor.findUnique({ where: { userId: req.user.id } });
     if (!doctorDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
-    filter.doctor = doctorDoc._id;
+    where.doctorId = doctorDoc.id;
   } else if (req.user.role === "patient") {
-    const patientDoc = await Patient.findOne({ user: req.user.id });
+    const patientDoc = await prisma.patient.findUnique({ where: { userId: req.user.id } });
     if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
-    filter.patient = patientDoc._id;
+    where.patientId = patientDoc.id;
   } else if (req.query.patient) {
-    filter.patient = req.query.patient;
+    where.patientId = req.query.patient;
   }
 
   const [prescriptions, total] = await Promise.all([
-    Prescription.find(filter)
-      .populate({ path: "doctor", populate: "user" })
-      .populate("patient", "firstName lastName")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit),
-    Prescription.countDocuments(filter),
+    prisma.prescription.findMany({
+      where,
+      include: { ...doctorWithUser, ...patientBasic },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+    }),
+    prisma.prescription.count({ where }),
   ]);
 
-  sendSuccess(res, { data: prescriptions, meta: buildMeta({ page, limit, total }) });
+  sendSuccess(res, { data: serialize(prescriptions), meta: buildMeta({ page, limit, total }) });
 });
 
 export const getPrescription = asyncHandler(async (req, res) => {
-  const prescription = await Prescription.findById(req.params.id)
-    .populate({ path: "doctor", populate: "user" })
-    .populate("patient");
+  const prescription = await prisma.prescription.findUnique({
+    where: { id: req.params.id },
+    include: { ...doctorWithUser, patient: true },
+  });
   if (!prescription) throw ApiError.notFound("Prescription not found");
-  sendSuccess(res, { data: { prescription } });
+  sendSuccess(res, { data: { prescription: serialize(prescription) } });
 });

@@ -47,12 +47,12 @@ export const generateDischargeSummaryPdf = async (admission, patient, doctor) =>
   doc.fontSize(12).text("Follow-up Instructions", { underline: true });
   doc.fontSize(11).text(admission.dischargeSummary?.followUpInstructions || "-");
 
-  return finalizeDoc(doc, `discharge-${admission._id}.pdf`);
+  return finalizeDoc(doc, `discharge-${admission.id}.pdf`);
 };
 
 export const generateInvoicePdf = async (invoice, patient) => {
   const doc = new PDFDocument({ margin: 50 });
-  header(doc, `Invoice #${invoice._id.toString().slice(-8).toUpperCase()}`);
+  header(doc, `Invoice #${invoice.id.slice(-8).toUpperCase()}`);
 
   doc.fontSize(11);
   doc.text(`Patient: ${patient.firstName} ${patient.lastName}`);
@@ -88,5 +88,5 @@ export const generateInvoicePdf = async (invoice, patient) => {
   y += 16;
   doc.fontSize(12).text(`Total: ${invoice.totalAmount.toFixed(2)}`, 380, y);
 
-  return finalizeDoc(doc, `invoice-${invoice._id}.pdf`);
+  return finalizeDoc(doc, `invoice-${invoice.id}.pdf`);
 };

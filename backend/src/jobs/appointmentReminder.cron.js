@@ -1,7 +1,8 @@
 import cron from "node-cron";
-import { Appointment } from "../models/Appointment.js";
+import { prisma } from "../config/db.js";
 import { notifyUser } from "../services/notification.service.js";
 import { sendAppointmentReminderEmail } from "../services/email.service.js";
+import { publicUserSelect } from "../utils/serialize.js";
 
 // Runs every hour; reminds patients about appointments happening tomorrow.
 export const scheduleAppointmentReminders = () => {
@@ -11,13 +12,17 @@ export const scheduleAppointmentReminders = () => {
       tomorrow.setDate(tomorrow.getDate() + 1);
       const dateStr = tomorrow.toISOString().slice(0, 10);
 
-      const appointments = await Appointment.find({ date: dateStr, status: "confirmed" })
-        .populate({ path: "doctor", populate: "user" })
-        .populate({ path: "patient", populate: "user" });
+      const appointments = await prisma.appointment.findMany({
+        where: { date: dateStr, status: "confirmed" },
+        include: {
+          doctor: { include: { user: { select: publicUserSelect } } },
+          patient: true,
+        },
+      });
 
       await Promise.all(
         appointments.map(async (appt) => {
-          const recipientEmail = appt.patient?.email || appt.patient?.user?.email;
+          const recipientEmail = appt.patient?.email;
           if (recipientEmail) {
             await sendAppointmentReminderEmail(recipientEmail, {
               doctorName: appt.doctor.user.name,
@@ -25,13 +30,13 @@ export const scheduleAppointmentReminders = () => {
               startTime: appt.startTime,
             });
           }
-          if (appt.patient?.user) {
+          if (appt.patient?.userId) {
             await notifyUser({
-              userId: appt.patient.user,
+              userId: appt.patient.userId,
               type: "appointment_reminder",
               title: "Appointment tomorrow",
               message: `Reminder: your appointment with Dr. ${appt.doctor.user.name} is tomorrow at ${appt.startTime}.`,
-              relatedEntity: { kind: "Appointment", id: appt._id },
+              relatedEntity: { kind: "Appointment", id: appt.id },
             });
           }
         })

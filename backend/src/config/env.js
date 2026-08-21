@@ -7,9 +7,7 @@ export const env = {
   port: Number(process.env.PORT) || 5001,
   clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
 
-  // Left undefined when unset — connectDB() decides what to do about it
-  // (falls back to a local in-memory Mongo outside production).
-  mongoUri: process.env.MONGO_URI,
+  databaseUrl: process.env.DATABASE_URL,
 
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || "dev_access_secret_change_me",

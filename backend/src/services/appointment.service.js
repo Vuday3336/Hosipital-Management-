@@ -1,5 +1,4 @@
-import { Appointment } from "../models/Appointment.js";
-import { Doctor } from "../models/Doctor.js";
+import { prisma } from "../config/db.js";
 import { ApiError } from "../utils/ApiError.js";
 
 const ACTIVE_STATUSES = ["pending", "confirmed"];
@@ -17,18 +16,23 @@ export const isWithinDoctorSchedule = (doctor, date, startTime, endTime) => {
 // Two [start,end) ranges overlap unless one ends at/before the other starts.
 export const timesOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
+const isUniqueConstraintError = (err) =>
+  err?.code === "P2002" || /duplicate key value violates unique constraint/.test(err?.message || "");
+
 export const findConflictingAppointment = async ({ doctor, date, startTime, endTime, excludeId }) => {
-  const candidates = await Appointment.find({
-    doctor,
-    date,
-    status: { $in: ACTIVE_STATUSES },
-    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  const candidates = await prisma.appointment.findMany({
+    where: {
+      doctorId: doctor,
+      date,
+      status: { in: ACTIVE_STATUSES },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
   });
   return candidates.find((appt) => timesOverlap(startTime, endTime, appt.startTime, appt.endTime)) || null;
 };
 
 export const bookAppointment = async ({ patient, doctor, department, date, startTime, endTime, reason, bookedBy }) => {
-  const doctorDoc = await Doctor.findById(doctor);
+  const doctorDoc = await prisma.doctor.findUnique({ where: { id: doctor } });
   if (!doctorDoc) throw ApiError.notFound("Doctor not found");
   if (!doctorDoc.isAvailable) throw ApiError.badRequest("Doctor is not currently accepting appointments");
 
@@ -42,18 +46,20 @@ export const bookAppointment = async ({ patient, doctor, department, date, start
   }
 
   try {
-    return await Appointment.create({
-      patient,
-      doctor,
-      department: department || doctorDoc.department,
-      date,
-      startTime,
-      endTime,
-      reason,
-      bookedBy,
+    return await prisma.appointment.create({
+      data: {
+        patientId: patient,
+        doctorId: doctor,
+        departmentId: department || doctorDoc.departmentId,
+        date,
+        startTime,
+        endTime,
+        reason,
+        bookedById: bookedBy,
+      },
     });
   } catch (err) {
-    if (err.code === 11000) {
+    if (isUniqueConstraintError(err)) {
       // Lost a race against a concurrent booking for the exact same slot.
       throw ApiError.conflict("This time slot is already booked for the selected doctor");
     }
@@ -62,38 +68,45 @@ export const bookAppointment = async ({ patient, doctor, department, date, start
 };
 
 export const rescheduleAppointment = async (appointmentId, { date, startTime, endTime }) => {
-  const appointment = await Appointment.findById(appointmentId);
+  const appointment = await prisma.appointment.findUnique({ where: { id: appointmentId } });
   if (!appointment) throw ApiError.notFound("Appointment not found");
 
   const conflict = await findConflictingAppointment({
-    doctor: appointment.doctor,
+    doctor: appointment.doctorId,
     date,
     startTime,
     endTime,
-    excludeId: appointment._id,
+    excludeId: appointment.id,
   });
   if (conflict) {
     throw ApiError.conflict("This time slot is already booked for the selected doctor");
   }
 
-  appointment.date = date;
-  appointment.startTime = startTime;
-  appointment.endTime = endTime;
-  appointment.status = "pending";
-  await appointment.save();
-  return appointment;
+  try {
+    return await prisma.appointment.update({
+      where: { id: appointmentId },
+      data: { date, startTime, endTime, status: "pending" },
+    });
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      throw ApiError.conflict("This time slot is already booked for the selected doctor");
+    }
+    throw err;
+  }
 };
 
 // Free slots for a doctor on a given date, derived from their weekly schedule minus booked appointments.
 export const getAvailability = async (doctorId, date) => {
-  const doctor = await Doctor.findById(doctorId);
+  const doctor = await prisma.doctor.findUnique({ where: { id: doctorId } });
   if (!doctor) throw ApiError.notFound("Doctor not found");
 
   const dow = dayOfWeekFor(date);
   const daySlots = doctor.schedule.filter((s) => s.dayOfWeek === dow);
   if (!daySlots.length) return [];
 
-  const booked = await Appointment.find({ doctor: doctorId, date, status: { $in: ACTIVE_STATUSES } });
+  const booked = await prisma.appointment.findMany({
+    where: { doctorId, date, status: { in: ACTIVE_STATUSES } },
+  });
 
   const slots = [];
   for (const block of daySlots) {

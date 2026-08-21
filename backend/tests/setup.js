@@ -1,21 +1,27 @@
-import { MongoMemoryServer } from "mongodb-memory-server";
-import mongoose from "mongoose";
-
-let mongod;
+import { prisma } from "../src/config/db.js";
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  await prisma.$connect();
 });
 
+// Deleted in FK-safe order: dependents before the tables they reference.
 afterEach(async () => {
-  const collections = mongoose.connection.collections;
-  for (const key in collections) {
-    await collections[key].deleteMany({});
-  }
+  await prisma.dispensingLog.deleteMany();
+  await prisma.invoice.deleteMany();
+  await prisma.prescription.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.appointment.deleteMany();
+  await prisma.admission.deleteMany();
+  await prisma.bed.deleteMany();
+  await prisma.doctor.deleteMany();
+  await prisma.patient.deleteMany();
+  await prisma.department.deleteMany();
+  await prisma.ward.deleteMany();
+  await prisma.medicine.deleteMany();
+  await prisma.user.deleteMany();
 });
 
 afterAll(async () => {
-  await mongoose.disconnect();
-  if (mongod) await mongod.stop();
+  await prisma.$disconnect();
 });

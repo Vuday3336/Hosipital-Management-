@@ -1,9 +1,6 @@
 import request from "supertest";
 import { createApp } from "../../src/app.js";
-import { User } from "../../src/models/User.js";
-import { Department } from "../../src/models/Department.js";
-import { Doctor } from "../../src/models/Doctor.js";
-import { Patient } from "../../src/models/Patient.js";
+import { prisma } from "../../src/config/db.js";
 import { createUser, issueTokenPair } from "../../src/services/auth.service.js";
 
 const app = createApp();
@@ -15,19 +12,18 @@ const asAdmin = async () => {
 };
 
 const setupDoctorAndPatient = async () => {
-  const department = await Department.create({ name: "Cardiology" });
+  const department = await prisma.department.create({ data: { name: "Cardiology" } });
   const doctorUser = await createUser({ name: "Dr. Strange", email: "strange@hms.local", password: "Password123", role: "doctor" });
-  const doctor = await Doctor.create({
-    user: doctorUser._id,
-    department: department._id,
-    specialization: "Cardiology",
-    schedule: [{ dayOfWeek: 1, startTime: "09:00", endTime: "12:00", slotDurationMinutes: 30 }], // Monday
+  const doctor = await prisma.doctor.create({
+    data: {
+      userId: doctorUser.id,
+      departmentId: department.id,
+      specialization: "Cardiology",
+      schedule: [{ dayOfWeek: 1, startTime: "09:00", endTime: "12:00", slotDurationMinutes: 30 }], // Monday
+    },
   });
-  const patient = await Patient.create({
-    firstName: "John",
-    lastName: "Smith",
-    dob: "1990-01-01",
-    gender: "male",
+  const patient = await prisma.patient.create({
+    data: { firstName: "John", lastName: "Smith", dob: new Date("1990-01-01"), gender: "male" },
   });
   return { department, doctor, patient };
 };
@@ -43,7 +39,7 @@ describe("Appointment conflict prevention", () => {
     const res = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" });
 
     expect(res.status).toBe(201);
     expect(res.body.data.appointment.status).toBe("pending");
@@ -53,7 +49,7 @@ describe("Appointment conflict prevention", () => {
     const { accessToken } = await asAdmin();
     const { doctor, patient } = await setupDoctorAndPatient();
 
-    const body = { patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" };
+    const body = { patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" };
     await request(app).post("/api/appointments").set("Authorization", `Bearer ${accessToken}`).send(body);
     const res = await request(app).post("/api/appointments").set("Authorization", `Bearer ${accessToken}`).send(body);
 
@@ -68,12 +64,12 @@ describe("Appointment conflict prevention", () => {
     await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" });
 
     const res = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:15", endTime: "09:45" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:15", endTime: "09:45" });
 
     expect(res.status).toBe(409);
   });
@@ -85,12 +81,12 @@ describe("Appointment conflict prevention", () => {
     await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" });
 
     const res = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:30", endTime: "10:00" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:30", endTime: "10:00" });
 
     expect(res.status).toBe(201);
   });
@@ -102,7 +98,7 @@ describe("Appointment conflict prevention", () => {
     const first = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" });
 
     await request(app)
       .post(`/api/appointments/${first.body.data.appointment._id}/cancel`)
@@ -111,7 +107,7 @@ describe("Appointment conflict prevention", () => {
     const res = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "09:00", endTime: "09:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "09:00", endTime: "09:30" });
 
     expect(res.status).toBe(201);
   });
@@ -123,7 +119,7 @@ describe("Appointment conflict prevention", () => {
     const res = await request(app)
       .post("/api/appointments")
       .set("Authorization", `Bearer ${accessToken}`)
-      .send({ patient: patient._id.toString(), doctor: doctor._id.toString(), date: MONDAY, startTime: "18:00", endTime: "18:30" });
+      .send({ patient: patient.id, doctor: doctor.id, date: MONDAY, startTime: "18:00", endTime: "18:30" });
 
     expect(res.status).toBe(400);
   });

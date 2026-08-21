@@ -1,13 +1,15 @@
-import { Appointment } from "../models/Appointment.js";
-import { Patient } from "../models/Patient.js";
-import { Doctor } from "../models/Doctor.js";
+import { prisma } from "../config/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { getPagination, buildMeta } from "../utils/paginate.js";
+import { serialize, publicUserSelect } from "../utils/serialize.js";
 import * as appointmentService from "../services/appointment.service.js";
 import { notifyUser } from "../services/notification.service.js";
 import { sendAppointmentConfirmationEmail } from "../services/email.service.js";
+
+const doctorWithUser = { doctor: { include: { user: { select: publicUserSelect }, department: { select: { id: true, name: true } } } } };
+const patientBasic = { patient: { select: { id: true, firstName: true, lastName: true, phone: true, email: true, userId: true } } };
 
 export const createAppointment = asyncHandler(async (req, res) => {
   const appointment = await appointmentService.bookAppointment({
@@ -15,12 +17,12 @@ export const createAppointment = asyncHandler(async (req, res) => {
     bookedBy: req.user.id,
   });
 
-  const populated = await appointment.populate([
-    { path: "doctor", populate: { path: "user", select: "name email" } },
-    { path: "patient", select: "firstName lastName user" },
-  ]);
+  const populated = await prisma.appointment.findUnique({
+    where: { id: appointment.id },
+    include: { ...doctorWithUser, ...patientBasic },
+  });
 
-  const recipientEmail = populated.patient?.email || populated.patient?.user?.email;
+  const recipientEmail = populated.patient?.email;
   if (recipientEmail) {
     sendAppointmentConfirmationEmail(recipientEmail, {
       doctorName: populated.doctor.user.name,
@@ -28,87 +30,90 @@ export const createAppointment = asyncHandler(async (req, res) => {
       startTime: appointment.startTime,
     }).catch(() => {});
   }
-  if (populated.patient?.user) {
+  if (populated.patient?.userId) {
     notifyUser({
-      userId: populated.patient.user,
+      userId: populated.patient.userId,
       type: "appointment_confirmation",
       title: "Appointment booked",
       message: `Your appointment with Dr. ${populated.doctor.user.name} on ${appointment.date} at ${appointment.startTime} is ${appointment.status}.`,
-      relatedEntity: { kind: "Appointment", id: appointment._id },
+      relatedEntity: { kind: "Appointment", id: appointment.id },
     }).catch(() => {});
   }
 
-  sendSuccess(res, { statusCode: 201, message: "Appointment booked", data: { appointment } });
+  sendSuccess(res, { statusCode: 201, message: "Appointment booked", data: { appointment: serialize(appointment) } });
 });
 
 export const listAppointments = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const { status, doctor, patient, date, from, to } = req.query;
 
-  const filter = {};
-  if (status) filter.status = status;
-  if (doctor) filter.doctor = doctor;
-  if (patient) filter.patient = patient;
-  if (date) filter.date = date;
-  if (from || to) filter.date = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
+  const where = {};
+  if (status) where.status = status;
+  if (doctor) where.doctorId = doctor;
+  if (patient) where.patientId = patient;
+  if (date) where.date = date;
+  if (from || to) where.date = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
 
   // Scope results for doctor/patient callers to their own records. A missing profile
-  // must fail CLOSED (no results) — an unset filter key is silently dropped by the
-  // driver and would otherwise return every appointment in the hospital.
+  // must fail CLOSED (no results) — an unset filter key would otherwise match everyone.
   if (req.user.role === "doctor") {
-    const doctorDoc = await Doctor.findOne({ user: req.user.id });
+    const doctorDoc = await prisma.doctor.findUnique({ where: { userId: req.user.id } });
     if (!doctorDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
-    filter.doctor = doctorDoc._id;
+    where.doctorId = doctorDoc.id;
   } else if (req.user.role === "patient") {
-    const patientDoc = await Patient.findOne({ user: req.user.id });
+    const patientDoc = await prisma.patient.findUnique({ where: { userId: req.user.id } });
     if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
-    filter.patient = patientDoc._id;
+    where.patientId = patientDoc.id;
   }
 
   const [appointments, total] = await Promise.all([
-    Appointment.find(filter)
-      .populate({ path: "doctor", populate: [{ path: "user", select: "name" }, { path: "department", select: "name" }] })
-      .populate("patient", "firstName lastName phone")
-      .sort({ date: -1, startTime: -1 })
-      .skip(skip)
-      .limit(limit),
-    Appointment.countDocuments(filter),
+    prisma.appointment.findMany({
+      where,
+      include: {
+        doctor: { include: { user: { select: { id: true, name: true } } } },
+        patient: { select: { id: true, firstName: true, lastName: true, phone: true } },
+      },
+      orderBy: [{ date: "desc" }, { startTime: "desc" }],
+      skip,
+      take: limit,
+    }),
+    prisma.appointment.count({ where }),
   ]);
 
-  sendSuccess(res, { data: appointments, meta: buildMeta({ page, limit, total }) });
+  sendSuccess(res, { data: serialize(appointments), meta: buildMeta({ page, limit, total }) });
 });
 
 export const getAppointment = asyncHandler(async (req, res) => {
-  const appointment = await Appointment.findById(req.params.id)
-    .populate({ path: "doctor", populate: ["user", "department"] })
-    .populate("patient");
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: req.params.id },
+    include: { ...doctorWithUser, patient: true },
+  });
   if (!appointment) throw ApiError.notFound("Appointment not found");
-  sendSuccess(res, { data: { appointment } });
+  sendSuccess(res, { data: { appointment: serialize(appointment) } });
 });
 
 export const updateAppointmentStatus = asyncHandler(async (req, res) => {
-  const appointment = await Appointment.findByIdAndUpdate(
-    req.params.id,
-    { status: req.body.status, ...(req.body.notes ? { notes: req.body.notes } : {}) },
-    { new: true, runValidators: true }
-  );
+  const appointment = await prisma.appointment
+    .update({
+      where: { id: req.params.id },
+      data: { status: req.body.status, ...(req.body.notes ? { notes: req.body.notes } : {}) },
+    })
+    .catch(() => null);
   if (!appointment) throw ApiError.notFound("Appointment not found");
-  sendSuccess(res, { message: "Appointment status updated", data: { appointment } });
+  sendSuccess(res, { message: "Appointment status updated", data: { appointment: serialize(appointment) } });
 });
 
 export const rescheduleAppointment = asyncHandler(async (req, res) => {
   const appointment = await appointmentService.rescheduleAppointment(req.params.id, req.body);
-  sendSuccess(res, { message: "Appointment rescheduled", data: { appointment } });
+  sendSuccess(res, { message: "Appointment rescheduled", data: { appointment: serialize(appointment) } });
 });
 
 export const cancelAppointment = asyncHandler(async (req, res) => {
-  const appointment = await Appointment.findByIdAndUpdate(
-    req.params.id,
-    { status: "cancelled" },
-    { new: true }
-  );
+  const appointment = await prisma.appointment
+    .update({ where: { id: req.params.id }, data: { status: "cancelled" } })
+    .catch(() => null);
   if (!appointment) throw ApiError.notFound("Appointment not found");
-  sendSuccess(res, { message: "Appointment cancelled", data: { appointment } });
+  sendSuccess(res, { message: "Appointment cancelled", data: { appointment: serialize(appointment) } });
 });
 
 export const getDoctorAvailability = asyncHandler(async (req, res) => {

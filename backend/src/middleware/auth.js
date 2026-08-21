@@ -1,6 +1,6 @@
 import { ApiError } from "../utils/ApiError.js";
 import { verifyAccessToken } from "../utils/tokens.js";
-import { User } from "../models/User.js";
+import { prisma } from "../config/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const requireAuth = asyncHandler(async (req, res, next) => {
@@ -18,11 +18,11 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
     throw ApiError.unauthorized("Invalid or expired access token");
   }
 
-  const user = await User.findById(payload.sub);
+  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user || !user.isActive) {
     throw ApiError.unauthorized("Account not found or disabled");
   }
 
-  req.user = { id: user._id.toString(), role: user.role, email: user.email, name: user.name };
+  req.user = { id: user.id, role: user.role, email: user.email, name: user.name };
   next();
 });

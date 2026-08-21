@@ -8,11 +8,9 @@ import { seedDevAccounts } from "./devSeed.js";
 const start = async () => {
   try {
     await connectDB();
-    console.log("MongoDB connected");
+    console.log("Database connected");
 
-    if (!env.mongoUri) {
-      // connectDB() fell back to the throwaway in-memory database — seed it with a
-      // login for every role so the app is immediately usable without Atlas.
+    if (env.nodeEnv === "development") {
       await seedDevAccounts();
     }
 

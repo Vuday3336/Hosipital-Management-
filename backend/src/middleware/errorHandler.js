@@ -11,18 +11,22 @@ export const errorHandler = (err, req, res, next) => {
   let message = err.message || "Internal server error";
   let details = err.details;
 
-  if (err.name === "ValidationError") {
-    // Mongoose validation error
-    statusCode = 400;
-    details = Object.values(err.errors).map((e) => e.message);
-    message = "Validation failed";
-  } else if (err.code === 11000) {
+  if (err.code === "P2002") {
+    // Prisma unique constraint violation
     statusCode = 409;
-    const field = Object.keys(err.keyValue || {})[0];
+    const field = err.meta?.target?.[0];
     message = field ? `${field} already exists` : "Duplicate value";
-  } else if (err.name === "CastError") {
+  } else if (err.code === "P2025") {
+    // Prisma: record required for this operation was not found
+    statusCode = 404;
+    message = "Record not found";
+  } else if (err.code === "P2003") {
+    // Prisma foreign key constraint failed — referenced a record that doesn't exist
     statusCode = 400;
-    message = `Invalid value for ${err.path}`;
+    message = "Referenced record does not exist";
+  } else if (err.name === "PrismaClientValidationError") {
+    statusCode = 400;
+    message = "Invalid request data";
   } else if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
     statusCode = 401;
     message = "Invalid or expired token";

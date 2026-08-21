@@ -1,0 +1,352 @@
+// Prisma schema for Meridian Health — migrated from MongoDB/Mongoose.
+// See ../../README.md for the schema design notes (JSONB for embedded docs,
+// RefreshToken as its own table, partial unique index added via raw migration).
+
+// The classic generator, not Prisma 7's new default ("prisma-client") — that one
+// only emits TypeScript, which doesn't run directly under plain Node.js/ESM
+// with no build step. This one still generates runnable JS, importable from
+// "@prisma/client" as usual; the app still connects through a driver adapter
+// (see src/config/db.js) since Prisma 7 has no built-in engine either way.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  doctor
+  receptionist
+  patient
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum AppointmentStatus {
+  pending
+  confirmed
+  completed
+  cancelled
+}
+
+enum AdmissionStatus {
+  admitted
+  discharged
+}
+
+enum WardType {
+  general
+  icu
+  private
+  maternity
+  pediatric
+}
+
+enum PaymentStatus {
+  unpaid
+  partial
+  paid
+}
+
+enum PaymentMethod {
+  cash
+  card
+  insurance
+  upi
+  other
+}
+
+enum NotificationType {
+  appointment_confirmation
+  appointment_reminder
+  low_stock
+  general
+}
+
+model User {
+  id                     String    @id @default(uuid())
+  name                   String
+  email                  String    @unique
+  passwordHash           String
+  role                   UserRole
+  phone                  String?
+  avatarUrl              String?
+  isActive               Boolean   @default(true)
+  passwordResetTokenHash String?
+  passwordResetExpires   DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  refreshTokens      RefreshToken[]
+  doctor             Doctor?
+  patientProfile     Patient?        @relation("PatientUser")
+  registeredPatients Patient[]       @relation("PatientRegisteredBy")
+  bookedAppointments Appointment[]   @relation("AppointmentBookedBy")
+  dispensingLogs     DispensingLog[] @relation("DispensingLogDispensedBy")
+  invoicesCreated    Invoice[]       @relation("InvoiceCreatedBy")
+  notifications      Notification[]
+}
+
+// Its own table (not a JSONB array on User) so rotation is a plain atomic
+// row DELETE ... RETURNING — see auth.service.js.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Department {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  description  String?
+  headDoctorId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  headDoctor    Doctor?       @relation("DepartmentHeadDoctor", fields: [headDoctorId], references: [id])
+  doctors       Doctor[]      @relation("DoctorDepartment")
+  appointments  Appointment[]
+}
+
+model Doctor {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  departmentId      String
+  specialization    String
+  qualifications    String[] @default([])
+  experienceYears   Int      @default(0)
+  consultationFee   Float    @default(0)
+  schedule          Json     @default("[]") // [{ dayOfWeek, startTime, endTime, slotDurationMinutes }]
+  isAvailable       Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department         Department    @relation("DoctorDepartment", fields: [departmentId], references: [id])
+  headOfDepartments  Department[]  @relation("DepartmentHeadDoctor")
+  appointments       Appointment[]
+  prescriptions      Prescription[]
+  admissions         Admission[]
+}
+
+model Patient {
+  id             String      @id @default(uuid())
+  userId         String?     @unique
+  firstName      String
+  lastName       String
+  dob            DateTime?
+  gender         Gender?
+  // Plain string, not a Postgres enum — the "A+"/"B-" values contain characters
+  // that don't map cleanly to enum identifiers; Zod already validates the set
+  // of allowed values at the API boundary, same as it did for the JSONB fields.
+  bloodGroup     String      @default("unknown")
+  phone          String?
+  email          String?
+  address        Json?
+  emergencyContact Json?
+  // [{ _id, condition, diagnosedDate, notes, doctor, createdAt }]
+  medicalHistory Json        @default("[]")
+  allergies      String[]    @default([])
+  registeredById String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user           User?           @relation("PatientUser", fields: [userId], references: [id])
+  registeredBy   User?           @relation("PatientRegisteredBy", fields: [registeredById], references: [id])
+  appointments   Appointment[]
+  prescriptions  Prescription[]
+  admissions     Admission[]
+  dispensingLogs DispensingLog[]
+  invoices       Invoice[]
+}
+
+model Appointment {
+  id           String            @id @default(uuid())
+  patientId    String
+  doctorId     String
+  departmentId String
+  date         String // "YYYY-MM-DD"
+  startTime    String // "HH:mm"
+  endTime      String
+  status       AppointmentStatus @default(pending)
+  reason       String?
+  notes        String?
+  bookedById   String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  patient       Patient        @relation(fields: [patientId], references: [id])
+  doctor        Doctor         @relation(fields: [doctorId], references: [id])
+  department    Department     @relation(fields: [departmentId], references: [id])
+  bookedBy      User           @relation("AppointmentBookedBy", fields: [bookedById], references: [id])
+  prescriptions Prescription[]
+  invoices      Invoice[]
+
+  // The double-booking guard is a raw-SQL *partial* unique index (only Prisma's
+  // migration DSL can't express the WHERE clause) — see prisma/migrations, and
+  // db.md in this folder for the exact statement. This plain index just keeps
+  // the common lookup query fast.
+  @@index([doctorId, date, startTime])
+}
+
+model Prescription {
+  id            String   @id @default(uuid())
+  appointmentId String?
+  patientId     String
+  doctorId      String
+  diagnosis     String
+  // [{ medicine, name, dosage, frequency, duration, instructions }]
+  medicines     Json     @default("[]")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  appointment    Appointment?    @relation(fields: [appointmentId], references: [id])
+  patient        Patient         @relation(fields: [patientId], references: [id])
+  doctor         Doctor          @relation(fields: [doctorId], references: [id])
+  dispensingLogs DispensingLog[]
+}
+
+model Ward {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  type       WardType
+  floor      Int      @default(0)
+  totalBeds  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  beds       Bed[]
+  admissions Admission[]
+}
+
+model Bed {
+  id                 String   @id @default(uuid())
+  wardId             String
+  bedNumber          String
+  isOccupied         Boolean  @default(false)
+  // Plain field, not a Prisma relation — avoids a circular Bed<->Admission
+  // relation for a field the app never populates/traverses, only sets.
+  currentAdmissionId String?
+  createdAt          DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  ward       Ward        @relation(fields: [wardId], references: [id])
+  admissions Admission[]
+
+  @@unique([wardId, bedNumber])
+}
+
+model Admission {
+  id                 String          @id @default(uuid())
+  patientId          String
+  attendingDoctorId  String
+  wardId             String
+  bedId              String
+  admissionDate      DateTime        @default(now())
+  dischargeDate      DateTime?
+  status             AdmissionStatus @default(admitted)
+  reasonForAdmission String
+  // { summary, followUpInstructions, pdfUrl, generatedAt }
+  dischargeSummary   Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  attendingDoctor Doctor   @relation(fields: [attendingDoctorId], references: [id])
+  ward            Ward     @relation(fields: [wardId], references: [id])
+  bed             Bed      @relation(fields: [bedId], references: [id])
+  invoices        Invoice[]
+}
+
+model Medicine {
+  id             String    @id @default(uuid())
+  name           String
+  genericName    String?
+  category       String?
+  manufacturer   String?
+  unit           String    @default("tablet")
+  stockQuantity  Int       @default(0)
+  reorderLevel   Int       @default(20)
+  unitPrice      Float     @default(0)
+  batchNumber    String?
+  expiryDate     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  dispensingLogs DispensingLog[]
+}
+
+model DispensingLog {
+  id             String   @id @default(uuid())
+  medicineId     String
+  patientId      String
+  prescriptionId String?
+  quantity       Int
+  dispensedById  String
+  dispensedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  medicine     Medicine      @relation(fields: [medicineId], references: [id])
+  patient      Patient       @relation(fields: [patientId], references: [id])
+  prescription Prescription? @relation(fields: [prescriptionId], references: [id])
+  dispensedBy  User          @relation("DispensingLogDispensedBy", fields: [dispensedById], references: [id])
+}
+
+model Invoice {
+  id            String         @id @default(uuid())
+  patientId     String
+  appointmentId String?
+  admissionId   String?
+  // [{ description, category, quantity, unitPrice, total }]
+  items         Json           @default("[]")
+  subtotal      Float          @default(0)
+  tax           Float          @default(0)
+  discount      Float          @default(0)
+  totalAmount   Float          @default(0)
+  paidAmount    Float          @default(0)
+  paymentStatus PaymentStatus  @default(unpaid)
+  paymentMethod PaymentMethod?
+  dueDate       DateTime?
+  pdfUrl        String?
+  createdById   String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  patient     Patient     @relation(fields: [patientId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  admission   Admission?   @relation(fields: [admissionId], references: [id])
+  createdBy   User         @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+}
+
+model Notification {
+  id             String           @id @default(uuid())
+  userId         String
+  type           NotificationType @default(general)
+  title          String
+  message        String
+  isRead         Boolean          @default(false)
+  // { kind, id }
+  relatedEntity  Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}

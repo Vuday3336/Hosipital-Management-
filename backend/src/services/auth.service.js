@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { User } from "../models/User.js";
+import { prisma } from "../config/db.js";
 import { ApiError } from "../utils/ApiError.js";
 import {
   signAccessToken,
@@ -13,44 +13,63 @@ import {
 const SALT_ROUNDS = 12;
 const MAX_REFRESH_TOKENS_PER_USER = 5;
 
+// toSafeObject() was a Mongoose instance method — there are no model instances
+// with Prisma, so this is now a plain function used everywhere a controller
+// used to call `user.toSafeObject()`.
+export const toSafeUser = (user) => ({
+  _id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  phone: user.phone,
+  avatarUrl: user.avatarUrl,
+  isActive: user.isActive,
+  createdAt: user.createdAt,
+});
+
+export const comparePassword = (user, candidate) => bcrypt.compare(candidate, user.passwordHash);
+
 export const createUser = async ({ name, email, password, role, phone }) => {
-  const existing = await User.findOne({ email: email.toLowerCase() });
+  const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (existing) {
     throw ApiError.conflict("An account with this email already exists");
   }
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  const user = await User.create({ name, email, passwordHash, role, phone });
-  return user;
+  return prisma.user.create({ data: { name, email: email.toLowerCase(), passwordHash, role, phone } });
 };
 
 export const issueTokenPair = async (user, userAgent) => {
   const accessToken = signAccessToken(user);
   const refreshToken = signRefreshToken(user);
 
-  // Atomic push+cap via update operators — a fetch-then-save here would race under
-  // concurrent requests (two tabs, or React StrictMode's double effect invocation)
-  // and throw a Mongoose VersionError when both try to save the same document.
-  await User.updateOne(
-    { _id: user._id },
-    {
-      $push: {
-        refreshTokens: {
-          $each: [{ tokenHash: hashToken(refreshToken), userAgent, expiresAt: refreshExpiryDate() }],
-          $slice: -MAX_REFRESH_TOKENS_PER_USER,
-        },
-      },
-    }
-  );
+  // A single INSERT is naturally atomic — no fetch-then-save race like the old
+  // Mongoose array-push version had (see rotateRefreshToken below for the fix
+  // that was needed there).
+  await prisma.refreshToken.create({
+    data: { userId: user.id, tokenHash: hashToken(refreshToken), userAgent, expiresAt: refreshExpiryDate() },
+  });
+
+  // Cap stored sessions per user so the table can't grow unbounded: delete
+  // everything past the N most recent for this user.
+  const stale = await prisma.refreshToken.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: "desc" },
+    skip: MAX_REFRESH_TOKENS_PER_USER,
+    select: { id: true },
+  });
+  if (stale.length) {
+    await prisma.refreshToken.deleteMany({ where: { id: { in: stale.map((t) => t.id) } } });
+  }
 
   return { accessToken, refreshToken };
 };
 
 export const authenticate = async (email, password) => {
-  const user = await User.findOne({ email: email.toLowerCase() }).select("+passwordHash");
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (!user || !user.isActive) {
     throw ApiError.unauthorized("Invalid email or password");
   }
-  const valid = await user.comparePassword(password);
+  const valid = await comparePassword(user, password);
   if (!valid) {
     throw ApiError.unauthorized("Invalid email or password");
   }
@@ -67,22 +86,22 @@ export const rotateRefreshToken = async (refreshToken) => {
 
   const tokenHash = hashToken(refreshToken);
 
-  // Atomically find-and-remove the token in one step: `new: false` returns the
-  // document as it was *before* the $pull, so a stored entry that matched is
-  // consumed exactly once even if two requests race on the same token (a second,
-  // concurrent request for the same token simply finds nothing left to pull).
-  const user = await User.findOneAndUpdate(
-    { _id: payload.sub, "refreshTokens.tokenHash": tokenHash },
-    { $pull: { refreshTokens: { tokenHash } } },
-    { new: false }
-  ).select("+refreshTokens");
+  // Atomic find-and-remove in one statement: `deleteMany` + `returning` isn't
+  // available in Prisma, so this uses a raw DELETE ... RETURNING, which is
+  // atomic at the row level in Postgres — a concurrent request for the same
+  // (already-rotated) token simply finds nothing to delete, exactly mirroring
+  // the Mongo `findOneAndUpdate` fix this replaces.
+  const deleted = await prisma.$queryRaw`
+    DELETE FROM "RefreshToken" WHERE "tokenHash" = ${tokenHash} RETURNING *
+  `;
+  const stored = deleted[0];
 
-  if (!user || !user.isActive) {
+  if (!stored) {
     throw ApiError.unauthorized("Refresh token no longer valid, please log in again");
   }
 
-  const stored = user.refreshTokens.find((t) => t.tokenHash === tokenHash);
-  if (!stored || stored.expiresAt < new Date()) {
+  const user = await prisma.user.findUnique({ where: { id: stored.userId } });
+  if (!user || !user.isActive || stored.expiresAt < new Date()) {
     throw ApiError.unauthorized("Refresh token no longer valid, please log in again");
   }
 
@@ -90,37 +109,43 @@ export const rotateRefreshToken = async (refreshToken) => {
 };
 
 export const revokeRefreshToken = async (userId, refreshToken) => {
-  await User.updateOne({ _id: userId }, { $pull: { refreshTokens: { tokenHash: hashToken(refreshToken) } } });
+  await prisma.refreshToken.deleteMany({ where: { userId, tokenHash: hashToken(refreshToken) } });
 };
 
 export const requestPasswordReset = async (email) => {
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (!user) {
     // Don't reveal whether the email exists.
     return null;
   }
   const rawToken = crypto.randomBytes(32).toString("hex");
-  user.passwordResetTokenHash = hashToken(rawToken);
-  user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-  await user.save();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordResetTokenHash: hashToken(rawToken),
+      passwordResetExpires: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+    },
+  });
   return { user, rawToken };
 };
 
 export const resetPassword = async (rawToken, newPassword) => {
   const tokenHash = hashToken(rawToken);
-  const user = await User.findOne({
-    passwordResetTokenHash: tokenHash,
-    passwordResetExpires: { $gt: new Date() },
-  }).select("+passwordResetTokenHash +passwordResetExpires +refreshTokens");
+  const user = await prisma.user.findFirst({
+    where: { passwordResetTokenHash: tokenHash, passwordResetExpires: { gt: new Date() } },
+  });
 
   if (!user) {
     throw ApiError.badRequest("Reset token is invalid or has expired");
   }
 
-  user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  user.passwordResetTokenHash = undefined;
-  user.passwordResetExpires = undefined;
-  user.refreshTokens = []; // force re-login everywhere
-  await user.save();
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, passwordResetTokenHash: null, passwordResetExpires: null },
+    }),
+    prisma.refreshToken.deleteMany({ where: { userId: user.id } }), // force re-login everywhere
+  ]);
   return user;
 };
