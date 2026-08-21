@@ -12,8 +12,14 @@ import {
   resetPassword as resetPasswordService,
 } from "../services/auth.service.js";
 import { User } from "../models/User.js";
+import { Patient } from "../models/Patient.js";
 import bcrypt from "bcryptjs";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email.service.js";
+
+const splitName = (name) => {
+  const [firstName, ...rest] = name.trim().split(/\s+/);
+  return { firstName, lastName: rest.join(" ") || firstName };
+};
 
 const REFRESH_COOKIE = "refreshToken";
 
@@ -31,6 +37,11 @@ const clearRefreshCookie = (res) => res.clearCookie(REFRESH_COOKIE, { path: "/ap
 export const register = asyncHandler(async (req, res) => {
   const { name, email, password, phone } = req.body;
   const user = await createUser({ name, email, password, role: "patient", phone });
+
+  // Every patient needs a Patient profile to book appointments, view records, and see
+  // bills — self-registration creates a minimal stub; dob/gender get filled in later.
+  await Patient.create({ ...splitName(name), user: user._id, phone, email: user.email, registeredBy: user._id });
+
   const { accessToken, refreshToken } = await issueTokenPair(user, req.headers["user-agent"]);
   setRefreshCookie(res, refreshToken);
   sendWelcomeEmail(user.email, user.name).catch(() => {});

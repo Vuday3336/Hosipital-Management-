@@ -30,7 +30,10 @@ export const listInvoices = asyncHandler(async (req, res) => {
 
   if (req.user.role === "patient") {
     const patientDoc = await Patient.findOne({ user: req.user.id });
-    filter.patient = patientDoc?._id;
+    // Fail closed: an unset filter key is dropped by the driver and would otherwise
+    // return every invoice in the hospital to a patient with no linked profile yet.
+    if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+    filter.patient = patientDoc._id;
   } else if (req.query.patient) {
     filter.patient = req.query.patient;
   }

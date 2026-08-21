@@ -3,11 +3,18 @@ import { connectDB } from "./config/db.js";
 import { env } from "./config/env.js";
 import { scheduleLowStockCheck } from "./jobs/lowStockCheck.cron.js";
 import { scheduleAppointmentReminders } from "./jobs/appointmentReminder.cron.js";
+import { seedDevAccounts } from "./devSeed.js";
 
 const start = async () => {
   try {
     await connectDB();
     console.log("MongoDB connected");
+
+    if (!env.mongoUri) {
+      // connectDB() fell back to the throwaway in-memory database — seed it with a
+      // login for every role so the app is immediately usable without Atlas.
+      await seedDevAccounts();
+    }
 
     const app = createApp();
     app.listen(env.port, () => {

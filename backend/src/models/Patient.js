@@ -15,8 +15,10 @@ const patientSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
-    dob: { type: Date, required: true },
-    gender: { type: String, enum: ["male", "female", "other"], required: true },
+    // Optional at creation: self-registered patients get a profile stub before they've
+    // filled in demographics — admin/receptionist-registered walk-ins usually set these upfront.
+    dob: { type: Date },
+    gender: { type: String, enum: ["male", "female", "other"] },
     bloodGroup: {
       type: String,
       enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"],

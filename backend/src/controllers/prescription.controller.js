@@ -18,12 +18,16 @@ export const listPrescriptions = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filter = {};
 
+  // Fail closed: an unset filter key is dropped by the driver and would otherwise
+  // return every record in the hospital to a caller with no linked profile yet.
   if (req.user.role === "doctor") {
     const doctorDoc = await Doctor.findOne({ user: req.user.id });
-    filter.doctor = doctorDoc?._id;
+    if (!doctorDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+    filter.doctor = doctorDoc._id;
   } else if (req.user.role === "patient") {
     const patientDoc = await Patient.findOne({ user: req.user.id });
-    filter.patient = patientDoc?._id;
+    if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+    filter.patient = patientDoc._id;
   } else if (req.query.patient) {
     filter.patient = req.query.patient;
   }

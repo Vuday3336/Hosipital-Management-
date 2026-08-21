@@ -15,6 +15,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get("/me", requireRole("patient"), ctrl.getMyPatientProfile);
+router.patch("/me", requireRole("patient"), validate(updatePatientSchema), ctrl.updateMyPatientProfile);
 
 router.get(
   "/",

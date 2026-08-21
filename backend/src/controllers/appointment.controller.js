@@ -52,13 +52,17 @@ export const listAppointments = asyncHandler(async (req, res) => {
   if (date) filter.date = date;
   if (from || to) filter.date = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
 
-  // Scope results for doctor/patient callers to their own records.
+  // Scope results for doctor/patient callers to their own records. A missing profile
+  // must fail CLOSED (no results) — an unset filter key is silently dropped by the
+  // driver and would otherwise return every appointment in the hospital.
   if (req.user.role === "doctor") {
     const doctorDoc = await Doctor.findOne({ user: req.user.id });
-    filter.doctor = doctorDoc?._id;
+    if (!doctorDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+    filter.doctor = doctorDoc._id;
   } else if (req.user.role === "patient") {
     const patientDoc = await Patient.findOne({ user: req.user.id });
-    filter.patient = patientDoc?._id;
+    if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+    filter.patient = patientDoc._id;
   }
 
   const [appointments, total] = await Promise.all([

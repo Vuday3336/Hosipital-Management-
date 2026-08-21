@@ -64,3 +64,12 @@ export const getMyPatientProfile = asyncHandler(async (req, res) => {
   if (!patient) throw ApiError.notFound("No patient profile linked to this account");
   sendSuccess(res, { data: { patient } });
 });
+
+export const updateMyPatientProfile = asyncHandler(async (req, res) => {
+  const patient = await Patient.findOneAndUpdate({ user: req.user.id }, req.body, {
+    new: true,
+    runValidators: true,
+  });
+  if (!patient) throw ApiError.notFound("No patient profile linked to this account");
+  sendSuccess(res, { message: "Profile updated", data: { patient } });
+});
