@@ -95,7 +95,11 @@ frontend/  React (Vite) SPA — see frontend/src for api, store, components,
 ### Prerequisites
 
 - Node.js 18+
-- A MongoDB Atlas cluster (or any MongoDB 6+ instance) connection string
+- (Optional) A MongoDB Atlas cluster (or any MongoDB 6+ instance) connection
+  string — if you skip this, `npm run dev` automatically falls back to a
+  temporary in-memory database so the app runs with zero config. That data
+  does **not** persist across restarts; set `MONGO_URI` once you have a real
+  cluster. Production (`NODE_ENV=production`) always requires `MONGO_URI`.
 - (Optional) SMTP credentials for outbound email — the app degrades
   gracefully and skips sending if none are configured
 
@@ -103,10 +107,13 @@ frontend/  React (Vite) SPA — see frontend/src for api, store, components,
 
 ```bash
 cd backend
-cp .env.example .env   # fill in MONGO_URI at minimum
+cp .env.example .env   # optional — works with zero config, see above
 npm install
-npm run seed            # creates a bootstrap admin account
-npm run dev              # http://localhost:5000
+npm run dev              # http://localhost:5001
+npm run seed              # (optional) creates a bootstrap admin account —
+                           # run this *while* npm run dev is running if you're
+                           # on the in-memory fallback, since seed and dev
+                           # would otherwise get two different throwaway DBs
 ```
 
 Run the test suite (auth flow, appointment conflict logic, billing math):

@@ -2,20 +2,14 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const required = (name, fallback) => {
-  const value = process.env[name] ?? fallback;
-  if (value === undefined) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-};
-
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
-  port: Number(process.env.PORT) || 5000,
+  port: Number(process.env.PORT) || 5001,
   clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
 
-  mongoUri: process.env.NODE_ENV === "test" ? undefined : required("MONGO_URI"),
+  // Left undefined when unset — connectDB() decides what to do about it
+  // (falls back to a local in-memory Mongo outside production).
+  mongoUri: process.env.MONGO_URI,
 
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || "dev_access_secret_change_me",
