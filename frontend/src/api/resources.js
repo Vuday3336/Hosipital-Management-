@@ -57,6 +57,7 @@ export const medicinesApi = {
   adjustStock: (id, delta, reason) => unwrap(api.patch(`/medicines/${id}/stock`, { delta, reason })),
   dispense: (payload) => unwrap(api.post("/medicines/dispense", payload)),
   dispensingLogs: (params) => unwrap(api.get("/medicines/dispensing-logs", { params })),
+  myDispensingLog: (params) => unwrap(api.get("/medicines/my-dispensing-log", { params })),
 };
 
 export const invoicesApi = {

@@ -1,7 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
+import clsx from "clsx";
 
-export const Modal = ({ open, onClose, title, children }) => (
+const sizes = {
+  md: "max-w-lg",
+  lg: "max-w-2xl",
+};
+
+export const Modal = ({ open, onClose, title, size = "md", children }) => (
   <AnimatePresence>
     {open && (
       <motion.div
@@ -12,7 +18,10 @@ export const Modal = ({ open, onClose, title, children }) => (
         onClick={onClose}
       >
         <motion.div
-          className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
+          className={clsx(
+            "w-full rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto",
+            sizes[size] || sizes.md
+          )}
           initial={{ opacity: 0, scale: 0.96, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}

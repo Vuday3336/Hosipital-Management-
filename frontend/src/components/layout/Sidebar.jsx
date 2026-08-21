@@ -31,6 +31,7 @@ const NAV_BY_ROLE = {
     { to: "/patient", label: "Overview", end: true },
     { to: "/patient/appointments", label: "My Appointments" },
     { to: "/patient/records", label: "My Records" },
+    { to: "/patient/prescriptions", label: "Prescriptions" },
     { to: "/patient/bills", label: "My Bills" },
   ],
 };

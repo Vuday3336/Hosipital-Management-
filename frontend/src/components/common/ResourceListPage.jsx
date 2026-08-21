@@ -20,6 +20,7 @@ export const ResourceListPage = ({
   onCreate,
   extraFilters,
   emptyHint,
+  rowKey = "_id",
 }) => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -71,7 +72,7 @@ export const ResourceListPage = ({
       )}
       {status === "success" && rows.length > 0 && (
         <>
-          <Table columns={columns} rows={rows} onRowClick={onRowClick} />
+          <Table columns={columns} rows={rows} onRowClick={onRowClick} keyField={rowKey} />
           <Pagination page={meta.page} totalPages={meta.totalPages} onChange={setPage} />
         </>
       )}

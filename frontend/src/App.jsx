@@ -101,6 +101,7 @@ export default function App() {
               <Route index element={<PatientOverview />} />
               <Route path="appointments">{AppointmentRoutes()}</Route>
               <Route path="records" element={<PatientRecords />} />
+              <Route path="prescriptions" element={<PrescriptionsPage />} />
               <Route path="bills" element={<BillingPage />} />
             </Route>
           </Route>

@@ -53,7 +53,7 @@ export const PrescriptionsPage = () => {
         onCreate={role === "doctor" ? () => setModalOpen(true) : undefined}
       />
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Write prescription">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Write prescription" size="lg">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <Select label="Patient" {...register("patient", { required: true })}>
             <option value="">Select…</option>
@@ -65,17 +65,24 @@ export const PrescriptionsPage = () => {
 
           <div className="space-y-2">
             <p className="text-sm font-medium text-ink/80">Medicines</p>
-            {fields.map((field, index) => (
-              <div key={field.id} className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-end gap-2">
-                <Input placeholder="Name" {...register(`medicines.${index}.name`, { required: true })} />
-                <Input placeholder="Dosage" {...register(`medicines.${index}.dosage`, { required: true })} />
-                <Input placeholder="Frequency" {...register(`medicines.${index}.frequency`, { required: true })} />
-                <Input placeholder="Duration" {...register(`medicines.${index}.duration`, { required: true })} />
-                <button type="button" onClick={() => remove(index)} className="rounded-lg p-2 text-ink/40 hover:bg-black/5 hover:text-red-500">
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
+            <div className="space-y-2 overflow-x-auto">
+              {fields.map((field, index) => (
+                <div key={field.id} className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_36px]">
+                  <Input placeholder="Name" {...register(`medicines.${index}.name`, { required: true })} />
+                  <Input placeholder="Dosage" {...register(`medicines.${index}.dosage`, { required: true })} />
+                  <Input placeholder="Frequency" {...register(`medicines.${index}.frequency`, { required: true })} />
+                  <Input placeholder="Duration" {...register(`medicines.${index}.duration`, { required: true })} />
+                  <button
+                    type="button"
+                    onClick={() => remove(index)}
+                    className="col-span-2 flex items-center justify-center gap-1.5 rounded-lg p-2 text-ink/40 hover:bg-black/5 hover:text-red-500 sm:col-span-1"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="text-xs sm:hidden">Remove</span>
+                  </button>
+                </div>
+              ))}
+            </div>
             <Button type="button" size="sm" variant="secondary" onClick={() => append(emptyMedicine)}>
               <Plus className="h-4 w-4" /> Add medicine
             </Button>

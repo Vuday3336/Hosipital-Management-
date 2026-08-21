@@ -13,7 +13,12 @@ import {
 
 const router = Router();
 
-router.use(requireAuth, requireRole("admin", "doctor", "receptionist"));
+router.use(requireAuth);
+
+// A patient may see their own dispensing history, but never the inventory itself.
+router.get("/my-dispensing-log", requireRole("patient"), ctrl.listMyDispensingLogs);
+
+router.use(requireRole("admin", "doctor", "receptionist"));
 
 router.get("/", validate(listMedicinesQuerySchema, "query"), ctrl.listMedicines);
 router.post("/", requireRole("admin"), validate(createMedicineSchema), ctrl.createMedicine);

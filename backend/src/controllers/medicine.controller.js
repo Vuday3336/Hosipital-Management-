@@ -1,5 +1,6 @@
 import { Medicine } from "../models/Medicine.js";
 import { DispensingLog } from "../models/DispensingLog.js";
+import { Patient } from "../models/Patient.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -79,6 +80,25 @@ export const listDispensingLogs = asyncHandler(async (req, res) => {
     DispensingLog.find(filter)
       .populate("medicine", "name unit")
       .populate("patient", "firstName lastName")
+      .populate("dispensedBy", "name")
+      .sort({ dispensedAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    DispensingLog.countDocuments(filter),
+  ]);
+
+  sendSuccess(res, { data: logs, meta: buildMeta({ page, limit, total }) });
+});
+
+export const listMyDispensingLogs = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
+  const patientDoc = await Patient.findOne({ user: req.user.id });
+  if (!patientDoc) return sendSuccess(res, { data: [], meta: buildMeta({ page, limit, total: 0 }) });
+
+  const filter = { patient: patientDoc._id };
+  const [logs, total] = await Promise.all([
+    DispensingLog.find(filter)
+      .populate("medicine", "name unit")
       .populate("dispensedBy", "name")
       .sort({ dispensedAt: -1 })
       .skip(skip)

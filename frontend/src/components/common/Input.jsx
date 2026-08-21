@@ -4,7 +4,7 @@ import clsx from "clsx";
 export const Input = forwardRef(({ label, error, className, id, ...props }, ref) => {
   const inputId = id || props.name;
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       {label && (
         <label htmlFor={inputId} className="text-sm font-medium text-ink/80">
           {label}
@@ -14,7 +14,7 @@ export const Input = forwardRef(({ label, error, className, id, ...props }, ref)
         ref={ref}
         id={inputId}
         className={clsx(
-          "rounded-lg border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink/35",
+          "w-full min-w-0 rounded-lg border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink/35",
           "transition-shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40",
           error ? "border-red-400" : "border-black/10 focus:border-brand-400",
           className
@@ -30,7 +30,7 @@ Input.displayName = "Input";
 export const Select = forwardRef(({ label, error, className, id, children, ...props }, ref) => {
   const inputId = id || props.name;
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       {label && (
         <label htmlFor={inputId} className="text-sm font-medium text-ink/80">
           {label}
@@ -40,7 +40,7 @@ export const Select = forwardRef(({ label, error, className, id, children, ...pr
         ref={ref}
         id={inputId}
         className={clsx(
-          "rounded-lg border bg-white px-3.5 py-2.5 text-sm text-ink",
+          "w-full min-w-0 rounded-lg border bg-white px-3.5 py-2.5 text-sm text-ink",
           "transition-shadow focus:outline-none focus:ring-2 focus:ring-brand-500/40",
           error ? "border-red-400" : "border-black/10 focus:border-brand-400",
           className
