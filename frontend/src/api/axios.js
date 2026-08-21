@@ -1,8 +1,11 @@
 import axios from "axios";
 import { useAuthStore } from "../store/authStore.js";
 
+// Falls back to the deployed Render API so the Vercel build works out of the
+// box even without VITE_API_URL set in the Vercel dashboard; local dev
+// overrides this via frontend/.env.
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  baseURL: import.meta.env.VITE_API_URL || "https://meridian-health-api.onrender.com/api",
   withCredentials: true, // send the httpOnly refresh-token cookie
 });
 
